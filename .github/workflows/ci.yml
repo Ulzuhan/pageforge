@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      # The interface is built before it is embedded; no generated asset is committed.
+      - run: npm run build
+      - run: go vet ./cmd/... ./internal/...
+      - run: npm run test:go
+      - name: Gate and «nowhere to upload», against the binaries
+        run: npm run test:http
+      - run: npx playwright install --with-deps chromium
+      - name: CSP, Trusted Types, network and gate, in a browser, against the binaries
+        run: npm run test:browser
+      - name: Build both images
+        run: |
+          docker build --build-arg TOOL=pageforge -t pageforge-ci-pageforge .
+          docker build --build-arg TOOL=inkbar -t pageforge-ci-inkbar .
+      - name: The same suites against the images (read-only, no capabilities, uid 10001)
+        env:
+          TEST_LAUNCH: "1"
+          TEST_IMAGE_PREFIX: pageforge-ci
+        run: |
+          npm run test:http
+          npm run test:browser

@@ -1,0 +1,50 @@
+{
+  "name": "pageforge",
+  "version": "0.0.0",
+  "description": "PageForge and InkBar: PDF tools and true redaction that run entirely in your browser.",
+  "license": "MIT",
+  "author": "Ulzuhan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ulzuhan/pageforge.git"
+  },
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:web && npm run build:go",
+    "build:web": "node scripts/copy-pdfjs-assets.mjs && vite build --config vite.config.mts --mode pageforge && vite build --config vite.config.mts --mode inkbar",
+    "build:go": "go build -trimpath -o bin/pageforge ./cmd/pageforge && go build -trimpath -o bin/inkbar ./cmd/inkbar",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit && npm run build && npm run test:go && npm run test:http",
+    "test:unit": "vitest run",
+    "test:go": "go test -race ./cmd/... ./internal/...",
+    "test:http": "node scripts/test-http.mjs",
+    "test:browser": "node scripts/test-browser.mjs"
+  },
+  "dependencies": {
+    "@cantoo/pdf-lib": "2.11.1",
+    "@pdf-lib/standard-fonts": "1.0.0",
+    "pdfjs-dist": "6.5.438",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.1.1",
+    "eslint": "^9",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^16",
+    "playwright": "1.65.1",
+    "typescript": "^5",
+    "typescript-eslint": "^8.59.4",
+    "vite": "8.3.8",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

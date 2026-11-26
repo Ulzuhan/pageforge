@@ -1,0 +1,30 @@
+/* Placeholder look until the house theme is synced in (publishing step). No
+   inline styles anywhere: the CSP is style-src 'self'. */
+:root { color-scheme: light dark; --bg: #faf9f7; --fg: #1d1d1f; --muted: #6b6b70; --line: #e3e1dc; --accent: #b4441c; --card: #fff; }
+@media (prefers-color-scheme: dark) { :root { --bg: #131315; --fg: #ececee; --muted: #9a9aa2; --line: #2a2a2e; --accent: #f08a5d; --card: #1b1b1e; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent); }
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+.bar { display: flex; align-items: baseline; gap: 1rem; padding: .9rem 1.25rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.brand { font-weight: 700; font-size: 1.15rem; color: var(--fg); text-decoration: none; }
+.tagline, .who, .foot, .intro, .status { color: var(--muted); }
+.spacer { flex: 1; }
+.link { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; padding: 0; text-decoration: underline; }
+.main { flex: 1; width: min(980px, 100%); margin: 0 auto; padding: 1.5rem 1.25rem; }
+.foot { border-top: 1px solid var(--line); padding: .9rem 1.25rem; font-size: .9rem; }
+.drop { display: block; border: 2px dashed var(--line); border-radius: 12px; padding: 2rem; text-align: center; cursor: pointer; background: var(--card); }
+.drop input { display: block; margin: 0 auto .5rem; }
+.result dl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1rem; margin: 1.5rem 0; }
+.result dt { color: var(--muted); }
+.result dd { margin: 0; overflow-wrap: anywhere; }
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem; }
+.thumbs img { width: 100%; border: 1px solid var(--line); background: #fff; border-radius: 4px; }
+.password { margin-top: 1rem; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.error { color: var(--accent); }
+.landing { width: min(760px, 100%); margin: 0 auto; padding: 4rem 1.25rem; }
+.landing h1 { font-size: clamp(2rem, 6vw, 3rem); margin: 0 0 .5rem; }
+.landing .lead { font-size: 1.2rem; color: var(--muted); }
+.landing ul { padding-left: 1.2rem; }
+.button { display: inline-block; background: var(--accent); color: #fff; text-decoration: none; padding: .7rem 1.2rem; border-radius: 8px; font-weight: 600; margin: 1rem 0; }
+.notice { border-left: 3px solid var(--accent); padding: .5rem 1rem; background: var(--card); }

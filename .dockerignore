@@ -1,0 +1,10 @@
+node_modules
+bin
+internal/web/*/dist
+apps/*/public/pdfjs
+test-results
+.git
+.github
+*.log
+.env
+.env.*

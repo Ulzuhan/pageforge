@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>InkBar — True PDF redaction in your browser</title>
+    <meta name="description" content="Black out personal data in PDFs for real: what is under the bar is removed, not just covered." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <main class="landing">
+      <h1>InkBar</h1>
+      <p class="lead">Black out personal data in PDFs for real: what is under the bar is removed, not just covered.</p>
+      <p id="error" class="notice" role="alert" hidden></p>
+      <ul>
+        <li>Finds Spanish IDs, IBANs, cards, phone numbers and e-mails, checked by their control digits.</li>
+        <li>Removes the text under each bar and keeps the rest selectable; verifies the result three ways.</li>
+        <li>Your document never leaves your device.</li>
+      </ul>
+      <a class="button" href="/auth/login?next=/app/" data-testid="sign-in">Sign in to use InkBar</a>
+      <p class="notice">Your files are read in your browser and never sent to our server. The server has no route
+        that accepts a file: it only knows that you have an account and when you signed in.</p>
+    </main>
+    <script type="module" src="./landing.ts"></script>
+  </body>
+</html>

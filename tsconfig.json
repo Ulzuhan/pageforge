@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "types": ["vite/client", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "@pdf-core": ["packages/pdf-core/src/index.ts"],
+      "@pdf-core/*": ["packages/pdf-core/src/*"],
+      "@shell": ["packages/shell/src/index.ts"],
+      "@shell/*": ["packages/shell/src/*"]
+    }
+  },
+  "include": ["apps", "packages", "vite.config.mts", "vitest.config.mts"]
+}

@@ -1,0 +1,11 @@
+node_modules/
+bin/
+internal/web/*/dist/*
+!internal/web/*/dist/.gitkeep
+apps/*/public/pdfjs/
+test-results/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
