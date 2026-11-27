@@ -2,12 +2,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { unzipSync } from 'fflate';
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef } from '@cantoo/pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts } from '@cantoo/pdf-lib';
 import {
   cleanFile, imagesFile, interpretPage, mergeFiles, organizeFile, parseRanges, residue, splitFile, UnsupportedImage, SourceError,
   PasswordRequired, orientationMatrix,
 } from '@pdf-core';
-import { MARKERS, cleanSamplePdf, everything, labelledPdf, photoJpeg, photoPng, quadrantJpeg } from '../../../scripts/fixtures.mjs';
+import { MARKERS, cleanSamplePdf, everything, formPdf, labelledPdf, photoJpeg, photoPng, quadrantJpeg } from '../../../scripts/fixtures.mjs';
 import { mad, render } from './node-codec';
 
 const fixture = (f: string) => new Uint8Array(readFileSync(new URL(`./fixtures/${f}`, import.meta.url)));
@@ -80,6 +80,44 @@ describe('organize', () => {
     expect(alone.report.linksRemoved).toBe(2); // the page link, and the JavaScript one left with nothing to do
     const left = (await load(alone.bytes)).getPage(0).node.lookup(PDFName.of('Annots')) as PDFArray;
     expect(left.size()).toBe(1); // the web link stays
+  });
+});
+
+describe('what the pages drag along', () => {
+  // A value may be written as text, as UTF-16 hex (field values) or as hex glyph codes (appearances).
+  const hex = (s: string, utf16: boolean) => (utf16 ? 'FEFF' : '') + Array.from(s, (c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(utf16 ? 4 : 2, '0')).join('');
+  const holds = (all: string, m: string) => [m, hex(m, true), hex(m, false)].some((t) => all.includes(t));
+
+  it('leaves behind the fields, values and scripts of the pages that were left out', async () => {
+    const src = await formPdf();
+    expect(holds(await everything(src), MARKERS.other)).toBe(true);
+    for (const r of [await splitFile({ bytes: src }, 'extract', '1', 'doc'), await organizeFile({ bytes: src }, [{ page: 0, rotate: 0 }])]) {
+      const all = await everything(r.bytes);
+      expect(holds(all, MARKERS.field)).toBe(true); // the page's own field, in its appearance
+      expect(holds(all, MARKERS.other)).toBe(false); // the other page's value, which the field tree reached
+      expect(all).not.toContain(MARKERS.js); // the parent field's script
+    }
+    const both = await mergeFiles([{ bytes: src }]);
+    const all = await everything(both.bytes);
+    expect(holds(all, MARKERS.field) && holds(all, MARKERS.other)).toBe(true);
+    expect(all).not.toContain(MARKERS.js);
+  });
+
+  it('removes code chained after a harmless action, and keeps the harmless one', async () => {
+    const doc = await load(await labelledPdf(['P1', 'P2']));
+    const ctx = doc.context;
+    const js = (n: number) => ({ S: 'JavaScript', JS: PDFString.of(`app.alert("${MARKERS.js}-${n}")`) });
+    const link = ctx.register(ctx.obj({
+      Type: 'Annot', Subtype: 'Link', Rect: [40, 40, 200, 60],
+      A: { S: 'URI', URI: PDFString.of('https://example.com/'), Next: [js(1), { S: 'Named', N: 'NextPage', Next: js(2) }] },
+    }));
+    doc.getPage(0).node.set(PDFName.of('Annots'), ctx.obj([link]));
+    const r = await organizeFile({ bytes: await doc.save() }, [{ page: 0, rotate: 0 }, { page: 1, rotate: 0 }]);
+    expect(r.report.actionsRemoved).toBe(2);
+    const all = await everything(r.bytes);
+    expect(all).not.toContain(MARKERS.js);
+    expect(all).toContain('https://example.com/');
+    expect(all).toContain('/NextPage');
   });
 });
 
@@ -174,6 +212,32 @@ describe('clean', () => {
     expect(text).toContain('Visible page text');
     // What the page showed, it still shows: annotations drawn by pdf.js before, flattened after.
     expect(mad(await render(input, 0), await render(bytes, 0))).toBeLessThan(0.5);
+  });
+
+  it('cleans a file cleaned before without drawing one annotation over another', async () => {
+    const once = await cleanFile({ bytes: await cleanSamplePdf() });
+    const doc = await load(once.bytes);
+    const ctx = doc.context;
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const ap = ctx.register(ctx.stream('BT /Helv 12 Tf 2 6 Td (SECOND-NOTE-0011) Tj ET', {
+      Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 200, 24], Resources: { Font: { Helv: font.ref } },
+    }));
+    doc.getPage(0).node.set(PDFName.of('Annots'), ctx.obj([ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'FreeText', Rect: [300, 100, 500, 124], AP: { N: ap } }))]));
+    const twice = await cleanFile({ bytes: await doc.save() });
+    expect(twice.report.annotations.flattened).toMatchObject({ FreeText: 1 });
+    const text = textOf(await load(twice.bytes), 0);
+    for (const t of [MARKERS.field, MARKERS.note, 'SECOND-NOTE-0011']) expect(text, t).toContain(t);
+  });
+
+  it('draws filled fields that carry no appearance, from their values, before flattening', async () => {
+    const { bytes, report } = await cleanFile({ bytes: await formPdf({ appearances: false }) });
+    expect(report.annotations.redrawn).toBe(2);
+    expect(report.annotations.flattened).toMatchObject({ Widget: 2 });
+    expect(report.annotations.blank).toEqual({});
+    const doc = await load(bytes);
+    expect(residue(doc)).toEqual([]);
+    expect(textOf(doc, 0)).toContain(MARKERS.field);
+    expect(textOf(doc, 1)).toContain(MARKERS.other);
   });
 
   it('cleans a note left by Preview, keeping it on the page', async () => {

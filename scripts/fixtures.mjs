@@ -6,14 +6,14 @@
 import { createCanvas } from '@napi-rs/canvas';
 import { zlibSync } from 'fflate';
 import {
-  PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFString, StandardFonts,
+  PDFArray, PDFBool, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFString, StandardFonts,
   concatTransformationMatrix, decodePDFRawStream, drawObject, popGraphicsState, pushGraphicsState,
 } from '@cantoo/pdf-lib';
 
 export const MARKERS = {
   exif: 'EXIF-MARKER-0001', comment: 'COMMENT-MARKER-0002', xmp: 'XMP-MARKER-0003', author: 'Example Author',
   title: 'Example title', attachment: 'ATTACHMENT-MARKER-0004', js: 'JS-MARKER-0005', piece: 'PIECE-MARKER-0006',
-  field: 'FIELD-VALUE-0007', note: 'NOTE-TEXT-0008', hidden: 'HIDDEN-TEXT-0009',
+  field: 'FIELD-VALUE-0007', note: 'NOTE-TEXT-0008', hidden: 'HIDDEN-TEXT-0009', other: 'OTHER-PAGE-VALUE-0010',
 };
 
 const N = (s) => PDFName.of(s);
@@ -216,8 +216,11 @@ function scanPixels(w, h, rgb, seed) {
   return out;
 }
 
-/** «Scanned» A4 pages at ~240 ppi: grey Flate with a PNG predictor, or RGB Flate without one. */
-export async function scanPdf({ pages = 2, rgb = false, w = 2000 } = {}) {
+/**
+ * «Scanned» A4 pages at ~240 ppi: grey Flate with a PNG predictor, or RGB Flate without one.
+ * `arrays` writes /Filter and /DecodeParms as one-element arrays, which is valid and common.
+ */
+export async function scanPdf({ pages = 2, rgb = false, w = 2000, arrays = false } = {}) {
   const doc = await PDFDocument.create();
   const h = Math.round(w * A4[1] / A4[0]);
   for (let i = 0; i < pages; i++) {
@@ -232,7 +235,7 @@ export async function scanPdf({ pages = 2, rgb = false, w = 2000 } = {}) {
     }
     const ref = doc.context.register(doc.context.stream(data, {
       Type: 'XObject', Subtype: 'Image', Width: w, Height: h, ColorSpace: rgb ? 'DeviceRGB' : 'DeviceGray', BitsPerComponent: 8,
-      Filter: 'FlateDecode', ...(parms ? { DecodeParms: parms } : {}),
+      Filter: arrays ? ['FlateDecode'] : 'FlateDecode', ...(parms ? { DecodeParms: arrays ? [parms] : parms } : {}),
     }));
     const page = doc.addPage(A4);
     draw(page, page.node.newXObject('Scan', ref), [A4[0], 0, 0, A4[1], 0, 0]);
@@ -284,6 +287,34 @@ export async function zooPdf() {
     x += big ? 210 : 70;
   }
   return { bytes: await doc.save(), refs: Object.fromEntries(Object.entries(items).map(([k, r]) => [k, r.toString()])), smask: smask.toString() };
+}
+
+/**
+ * A filled form over two pages whose fields hang from one parent, the way
+ * LiveCycle forms do (person.name on page 1, person.other on page 2), with a
+ * calculation script on the parent. Without `appearances`, the widgets carry
+ * no appearance and /NeedAppearances asks the viewer to draw the values.
+ */
+export async function formPdf({ appearances = true } = {}) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = [doc.addPage(A4), doc.addPage(A4)];
+  pages.forEach((p, i) => p.drawText(`Form page ${i + 1}`, { x: 56, y: 780, size: 18, font }));
+  const form = doc.getForm();
+  const fields = [['person.name', MARKERS.field], ['person.other', MARKERS.other]].map(([name, value], i) => {
+    const f = form.createTextField(name);
+    f.setText(value);
+    f.addToPage(pages[i], { x: 56, y: 700, width: 300, height: 24, font });
+    return f;
+  });
+  form.updateFieldAppearances(font);
+  const parent = fields[0].acroField.getParent();
+  parent.dict.set(N('AA'), doc.context.obj({ C: { S: 'JavaScript', JS: PDFString.of(`console.println("${MARKERS.js}")`) } }));
+  if (!appearances) {
+    for (const f of fields) for (const w of f.acroField.getWidgets()) w.dict.delete(N('AP'));
+    form.acroForm.dict.set(N('NeedAppearances'), PDFBool.True);
+  }
+  return doc.save({ updateFieldAppearances: false });
 }
 
 /** Everything «Clean» must find, including an earlier version kept by an incremental save. */

@@ -6,13 +6,21 @@
 // to a box, and that box is mapped onto /Rect (spike, P9).
 //
 // Links and pop-ups have nothing to draw. Hidden annotations (flags Hidden or
-// NoView) stay out: what nobody sees is not kept.
+// NoView) stay out: what nobody sees is not kept. Annotations without an
+// appearance have nothing to draw either and are counted apart, as «blank»
+// (Clean first draws the form fields that lack one, from their values).
 import { PDFArray, PDFDict, PDFRef, PDFStream, type PDFDocument, type PDFObject, type PDFPage } from '@cantoo/pdf-lib';
 import { N, get, look, name, num, nums, pageResources, type Box, type Matrix } from './objects';
 
 const NOTHING_TO_DRAW = new Set(['Link', 'Popup']);
 
-export interface FlattenReport { flattened: Record<string, number>; dropped: Record<string, number> }
+export interface FlattenReport {
+  flattened: Record<string, number>;
+  /** Hidden (flags Hidden or NoView). */
+  dropped: Record<string, number>;
+  /** Nothing to draw: no appearance in the file, or an empty one. */
+  blank: Record<string, number>;
+}
 
 const bump = (r: Record<string, number>, k: string) => { r[k] = (r[k] ?? 0) + 1; };
 
@@ -24,7 +32,7 @@ function transformedBox(b: Box, m: Matrix): Box {
 
 const fmt = (x: number) => (Math.abs(x) < 1e-9 ? '0' : Number(x.toFixed(6)).toString());
 
-export function flattenAnnotations(doc: PDFDocument, page: PDFPage, report: FlattenReport = { flattened: {}, dropped: {} }): FlattenReport {
+export function flattenAnnotations(doc: PDFDocument, page: PDFPage, report: FlattenReport = { flattened: {}, dropped: {}, blank: {} }): FlattenReport {
   const ctx = doc.context;
   const node = page.node;
   const annots = look(ctx, node.get(N('Annots')));
@@ -33,6 +41,17 @@ export function flattenAnnotations(doc: PDFDocument, page: PDFPage, report: Flat
   const ops: string[] = [];
   const keep: PDFObject[] = [];
   const added: [string, PDFRef][] = [];
+  // New names must not take the place of one the page already uses: a page
+  // cleaned before has its PFAnnot0 already.
+  const res = pageResources(ctx, node);
+  const old = get(ctx, res, 'XObject');
+  const taken = new Set(old instanceof PDFDict ? old.keys().map((k) => k.decodeText()) : []);
+  let counter = 0;
+  const freeName = () => {
+    while (taken.has(`PFAnnot${counter}`)) counter++;
+    taken.add(`PFAnnot${counter}`);
+    return `PFAnnot${counter}`;
+  };
 
   for (const ref of annots.asArray()) {
     const a = look(ctx, ref);
@@ -50,18 +69,18 @@ export function flattenAnnotations(doc: PDFDocument, page: PDFPage, report: Flat
       ap = look(ctx, apRef);
     }
     const rect = nums(ctx, a.get(N('Rect')));
-    if (!(ap instanceof PDFStream) || !rect || rect.length !== 4) { bump(report.dropped, subtype); continue; }
+    if (!(ap instanceof PDFStream) || !rect || rect.length !== 4) { bump(report.blank, subtype); continue; }
     const r: Box = [Math.min(rect[0], rect[2]), Math.min(rect[1], rect[3]), Math.max(rect[0], rect[2]), Math.max(rect[1], rect[3])];
     const bbox = (nums(ctx, ap.dict.get(N('BBox'))) ?? [0, 0, r[2] - r[0], r[3] - r[1]]) as Box;
     const m = (nums(ctx, ap.dict.get(N('Matrix'))) ?? [1, 0, 0, 1, 0, 0]) as Matrix;
     const t = transformedBox(bbox, m);
     const w = t[2] - t[0], h = t[3] - t[1];
-    if (w <= 0 || h <= 0 || r[2] - r[0] <= 0 || r[3] - r[1] <= 0) { bump(report.dropped, subtype); continue; } // nothing visible (an empty signature box)
+    if (w <= 0 || h <= 0 || r[2] - r[0] <= 0 || r[3] - r[1] <= 0) { bump(report.blank, subtype); continue; } // nothing visible (an empty signature box)
     ap.dict.set(N('Type'), N('XObject'));
     ap.dict.set(N('Subtype'), N('Form'));
     if (!ap.dict.get(N('Resources')) && dr) ap.dict.set(N('Resources'), dr); // appearances that draw from the form's /DR
     const xref = apRef instanceof PDFRef ? apRef : ctx.register(ap);
-    const xname = `PFAnnot${added.length}`;
+    const xname = freeName();
     added.push([xname, xref]);
     const sx = (r[2] - r[0]) / w, sy = (r[3] - r[1]) / h;
     ops.push(`q ${fmt(sx)} 0 0 ${fmt(sy)} ${fmt(r[0] - sx * t[0])} ${fmt(r[1] - sy * t[1])} cm /${xname} Do Q`);
@@ -71,11 +90,9 @@ export function flattenAnnotations(doc: PDFDocument, page: PDFPage, report: Flat
   if (ops.length) {
     // The leaf gets its own copy of the effective resources: inherited ones
     // may be shared with other pages.
-    const res = pageResources(ctx, node);
     const own = ctx.obj({}) as PDFDict;
     for (const [k, v] of res.entries()) own.set(k, v);
     const xo = ctx.obj({}) as PDFDict;
-    const old = get(ctx, res, 'XObject');
     if (old instanceof PDFDict) for (const [k, v] of old.entries()) xo.set(k, v);
     for (const [n, r] of added) xo.set(N(n), r);
     own.set(N('XObject'), xo);

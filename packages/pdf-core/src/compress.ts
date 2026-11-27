@@ -17,7 +17,7 @@
 //
 // Honesty rules: an image is replaced only if the new one is smaller, and the
 // output is never larger than the input (then the input comes back as it was).
-import { PDFArray, PDFBool, PDFDict, PDFName, PDFNumber, PDFRawStream, PDFRef, decodePDFRawStream, type PDFDocument } from '@cantoo/pdf-lib';
+import { PDFArray, PDFBool, PDFDict, PDFName, PDFNull, PDFNumber, PDFRawStream, PDFRef, decodePDFRawStream, type PDFDocument } from '@cantoo/pdf-lib';
 import { unzlibSync, zlibSync } from 'fflate';
 import { collectGarbage, dedupeStreams } from './dedupe';
 import { interpretPage } from './interpret';
@@ -96,7 +96,13 @@ function classify(doc: PDFDocument, ref: PDFRef, s: PDFRawStream, masks: Set<str
     try { if (jpegInfo(s.contents).components !== colors) return 'components'; } catch { return 'unreadable'; }
     return { kind, filter: 'dct', predictor: 1, keepColorSpace };
   }
-  const dp = g('DecodeParms');
+  // With a filter array, the parameters come in an array too: one per filter.
+  let dp = g('DecodeParms');
+  if (dp instanceof PDFArray) {
+    if (dp.size() !== 1) return 'predictor';
+    dp = look(ctx, dp.get(0));
+  }
+  if (dp !== undefined && dp !== PDFNull && !(dp instanceof PDFDict)) return 'predictor';
   const predictor = dp instanceof PDFDict ? num(get(ctx, dp, 'Predictor')) ?? 1 : 1;
   if (predictor !== 1 && predictor < 10) return 'predictor';
   if (predictor >= 10 && dp instanceof PDFDict) {

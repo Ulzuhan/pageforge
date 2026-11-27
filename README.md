@@ -24,7 +24,9 @@ one repository, two container images:
 | **Split** | Take pages out (`1-3, 7`), or one file per range, or one per page (several files come in a zip) |
 | **Images to PDF** | JPEG and PNG, one per page, on A4, US Letter or the image's own size. A phone photo stored sideways is turned upright (EXIF orientation), and its EXIF and GPS are removed |
 | **Compress** | Three levels, below |
-| **Clean** | Finds and removes metadata (Info and XMP), attachments, JavaScript and opening actions, EXIF and GPS inside photos, bookmarks, tags and earlier versions kept by incremental saves. Filled forms and notes are drawn into the page first, so what the page shows stays. Says what it found |
+| **Clean** | Finds and removes metadata (Info and XMP), attachments, JavaScript and opening actions, EXIF and GPS inside photos, bookmarks, tags and earlier versions kept by incremental saves. Filled forms and notes are drawn into the page first, so what the page shows stays (fields saved without an appearance are drawn from their values). Says what it found |
+
+Merge, Organize and Split build a new document from the pages. Links between pages that came along keep working. Scripts, even chained after a harmless action, stay behind, and so does the form's field tree, which would otherwise bring along the values of the pages that were left out.
 
 Every function builds a **new document** from the pages: never «load and save»,
 which keeps everything, including what an earlier version deleted. What comes

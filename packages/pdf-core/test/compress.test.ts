@@ -86,6 +86,13 @@ describe('compression rules', () => {
     expect(gain(input.length, bytes.length)).toBeGreaterThan(0.7);
   });
 
+  it('reads the PNG predictor when /DecodeParms comes in an array', async () => {
+    const input = await scanPdf({ pages: 1, w: 600, arrays: true });
+    const { bytes, report } = await compressFile({ bytes: input }, 'medium', nodeCodec);
+    expect(report.images.replaced).toBe(1);
+    expect(mad(await render(input, 0), await render(bytes, 0))).toBeLessThan(6);
+  });
+
   it('leaves CMYK, indexed, 16-bit, /Decode, one-channel ICC and masks alone; keeps an ICC colour space', async () => {
     const { bytes: input, refs, smask } = await zooPdf();
     const { bytes, report } = await compressFile({ bytes: input }, 'strong', nodeCodec);

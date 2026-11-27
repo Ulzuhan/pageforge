@@ -228,7 +228,7 @@ for (const app of Object.values(apps)) {
     await page.getByTestId('run').click();
     out = await download();
     const report = await page.getByTestId('report').textContent();
-    for (const what of [/Camera data in 1 photo, including where it was taken/, /1 attached file/, /1 earlier version/, /XMP/, /script/, /form fields: their values stay on the page/]) {
+    for (const what of [/Camera data in 1 photo, including where it was taken/, /1 attached file/, /1 earlier version/, /XMP/, /script/, /form fields: what they show stays on the page/]) {
       assert.match(report, what);
     }
     const left = await everything(out.bytes);

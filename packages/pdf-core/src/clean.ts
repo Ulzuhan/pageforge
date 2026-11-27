@@ -6,12 +6,16 @@
 //  1. survey what is there (metadata, XMP, attachments, JavaScript, opening
 //     action, form fields, bookmarks, tags, earlier versions);
 //  2. draw visible annotations into the page, so that a filled form or a note
-//     does not vanish with the annotations;
+//     does not vanish with the annotations (form fields without an appearance
+//     of their own get one first, from their values);
 //  3. strip EXIF, GPS, XMP and comments from every embedded JPEG, at the byte
 //     level, pixels untouched (spike, P5);
 //  4. the sanitized copy, and one last sweep of private keys anywhere in it;
 //  5. check the saved result again (residue) before handing it over.
-import { PDFArray, PDFDict, PDFDocument, PDFRawStream, PDFStream } from '@cantoo/pdf-lib';
+import {
+  PDFArray, PDFBool, PDFDict, PDFDocument, PDFDropdown, PDFOptionList, PDFRawStream, PDFStream, PDFTextField,
+  type PDFField, type PDFFont, type PDFForm,
+} from '@cantoo/pdf-lib';
 import { flattenAnnotations, type FlattenReport } from './flatten';
 import { readExif, stripJpeg } from './jpeg';
 import { N, filters, get, look, name, walk } from './objects';
@@ -31,7 +35,8 @@ export interface CleanReport {
     /** Times the file was saved on top of itself; each kept the previous version inside. */
     earlierVersions: number;
   };
-  annotations: FlattenReport & { removed: Record<string, number> };
+  /** `redrawn`: form fields whose appearance was missing or stale, drawn from their values before flattening. */
+  annotations: FlattenReport & { removed: Record<string, number>; redrawn: number };
   jpeg: { images: number; cleaned: number; exif: number; gps: number; xmp: number; other: number; bytes: number };
   privateKeys: number;
   unusedResources: number;
@@ -44,6 +49,18 @@ const latin1 = (b: Uint8Array) => {
   for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
   return s;
 };
+
+/** Occurrences of an ASCII token in the bytes, without turning a file of up to 1 GB into one string. */
+function occurrences(b: Uint8Array, token: string): number {
+  const t = Array.from(token, (c) => c.charCodeAt(0));
+  let n = 0;
+  for (let i = b.indexOf(t[0]); i !== -1 && i <= b.length - t.length; i = b.indexOf(t[0], i + 1)) {
+    let k = 1;
+    while (k < t.length && b[i + k] === t[k]) k++;
+    if (k === t.length) n++;
+  }
+  return n;
+}
 
 function survey(doc: PDFDocument, bytes: Uint8Array): CleanReport['found'] {
   const ctx = doc.context;
@@ -60,9 +77,8 @@ function survey(doc: PDFDocument, bytes: Uint8Array): CleanReport['found'] {
     } else if (o instanceof PDFDict && o.has(N('JS'))) javascript++;
   });
   const fields = look(ctx, get(ctx, get(ctx, doc.catalog, 'AcroForm') as PDFDict | undefined, 'Fields'));
-  const text = latin1(bytes);
-  const eofs = (text.match(/%%EOF/g) ?? []).length;
-  const linearized = /\/Linearized/.test(text.slice(0, 2048));
+  const eofs = occurrences(bytes, '%%EOF');
+  const linearized = /\/Linearized/.test(latin1(bytes.subarray(0, 2048)));
   return {
     info: infoKeys,
     xmp,
@@ -74,6 +90,38 @@ function survey(doc: PDFDocument, bytes: Uint8Array): CleanReport['found'] {
     tags: doc.catalog.has(N('StructTreeRoot')),
     earlierVersions: Math.max(0, eofs - 1 - (linearized ? 1 : 0)),
   };
+}
+
+/**
+ * Form fields that do not say how they look. Programs that fill forms often
+ * leave the value in the field and ask the viewer to draw it (/NeedAppearances
+ * true), with no appearance or with the empty one of the blank form. Flattening
+ * draws appearances, so those values would vanish: they are drawn first, from
+ * the value, as a viewer would. With /NeedAppearances every text and choice
+ * field is redrawn, because the appearance it has may be the blank form's.
+ * A field that cannot be drawn (a script the standard font lacks) stays as it
+ * is, and flattening counts it as blank.
+ */
+async function drawFormFields(doc: PDFDocument): Promise<number> {
+  const ctx = doc.context;
+  const acro = get(ctx, doc.catalog, 'AcroForm');
+  if (!(acro instanceof PDFDict)) return 0;
+  const stale = look(ctx, acro.get(N('NeedAppearances'))) === PDFBool.True;
+  let form: PDFForm, fields: PDFField[];
+  try { form = doc.getForm(); fields = form.getFields(); } catch { return 0; }
+  let font: PDFFont | undefined;
+  let made = 0;
+  for (const field of fields) {
+    try {
+      if (stale && (field instanceof PDFTextField || field instanceof PDFDropdown || field instanceof PDFOptionList)) form.markFieldAsDirty(field.ref);
+      if (!field.needsAppearancesUpdate()) continue;
+      font ??= form.getDefaultFont();
+      field.defaultUpdateAppearances(font);
+      made++;
+    } catch { /* left as it was */ }
+  }
+  if (made) await doc.flush(); // the standard font gets its objects before the copy
+  return made;
 }
 
 function cleanJpegs(doc: PDFDocument, report: CleanReport['jpeg']) {
@@ -104,11 +152,12 @@ export async function clean(doc: PDFDocument, input: Uint8Array): Promise<{ byte
   const ctx = doc.context;
   const report: CleanReport = {
     found: survey(doc, input),
-    annotations: { flattened: {}, dropped: {}, removed: {} },
+    annotations: { flattened: {}, dropped: {}, blank: {}, removed: {}, redrawn: 0 },
     jpeg: { images: 0, cleaned: 0, exif: 0, gps: 0, xmp: 0, other: 0, bytes: 0 },
     privateKeys: 0, unusedResources: 0, before: input.length, after: 0,
   };
 
+  report.annotations.redrawn = await drawFormFields(doc);
   for (const page of doc.getPages()) {
     flattenAnnotations(doc, page, report.annotations);
     // What is left (links, pop-ups) goes with the sanitized copy; it is counted here.

@@ -13,7 +13,10 @@
 //  - links whose target page did not come along (or a named destination,
 //    which lived in the catalog) are removed: they would point nowhere;
 //  - actions that run code or other programs (JavaScript, Launch, forms that
-//    submit somewhere) are removed, from pages and from annotations.
+//    submit somewhere) are removed, from pages and from annotations, also
+//    when they are chained after a harmless one (/Next);
+//  - form widgets let go of the field tree (/Parent), which would otherwise
+//    bring along the fields, values and scripts of every page.
 import { PDFArray, PDFDict, PDFDocument, PDFObjectCopier, PDFPage, PDFPageLeaf, PDFRef, degrees, type PDFObject } from '@cantoo/pdf-lib';
 import { N, get, look, name } from './objects';
 
@@ -73,6 +76,27 @@ function tidy(doc: PDFDocument): TidyReport {
     const d = look(ctx, a);
     return d instanceof PDFDict && RISKY_ACTIONS.has(name(get(ctx, d, 'S')) ?? '');
   };
+  // An action may run others after it (/Next: one, or an array). The risky
+  // ones go, with whatever they would have run next.
+  const seenActions = new Set<PDFObject>();
+  const pruneNext = (action: PDFDict, depth = 0) => {
+    if (seenActions.has(action)) return;
+    seenActions.add(action);
+    const next = look(ctx, action.get(N('Next')));
+    if (next === undefined) return;
+    if (depth > 32) { action.delete(N('Next')); report.actionsRemoved++; return; }
+    const list = next instanceof PDFArray ? next.asArray() : [action.get(N('Next'))!];
+    const keep: PDFObject[] = [];
+    for (const item of list) {
+      const a = look(ctx, item);
+      if (!(a instanceof PDFDict)) continue;
+      if (risky(a)) { report.actionsRemoved++; continue; }
+      pruneNext(a, depth + 1);
+      keep.push(item);
+    }
+    if (!keep.length) action.delete(N('Next'));
+    else if (keep.length !== list.length || next instanceof PDFArray) action.set(N('Next'), keep.length === 1 ? keep[0] : ctx.obj(keep));
+  };
   const deadDest = (d: PDFObject | undefined): boolean => {
     const dest = look(ctx, d);
     if (dest instanceof PDFArray) {
@@ -95,8 +119,15 @@ function tidy(doc: PDFDocument): TidyReport {
       a.delete(N('StructParent'));
       if (a.has(N('P'))) a.set(N('P'), page.ref); // its page, which may be a new one
       if (a.has(N('AA'))) { a.delete(N('AA')); report.actionsRemoved++; }
+      // A form field's widget hangs from the field tree (/Parent), and the tree
+      // reaches every widget of every page through /Kids, values included. The
+      // form does not come along (no /AcroForm), so the widget lets go of it:
+      // what it shows is in its own appearance, and the pages that were left
+      // out stay out, scripts in their fields too.
+      if (name(get(ctx, a, 'Subtype')) === 'Widget') a.delete(N('Parent'));
       const action = look(ctx, a.get(N('A')));
       if (risky(action)) { a.delete(N('A')); report.actionsRemoved++; }
+      else if (action instanceof PDFDict) pruneNext(action);
       if (name(get(ctx, a, 'Subtype')) === 'Link') {
         const act = look(ctx, a.get(N('A')));
         const goTo = act instanceof PDFDict && name(get(ctx, act, 'S')) === 'GoTo';

@@ -15,11 +15,14 @@ function findings(r: CleanReport): string[] {
   if (f.attachments) out.push(`${plural(f.attachments, 'attached file')}.`);
   if (f.javascript) out.push(`${plural(f.javascript, 'script')} (JavaScript).`);
   if (f.openAction) out.push('An action that runs when the file is opened.');
-  if (f.formFields) out.push(`${plural(f.formFields, 'form field')}: their values stay on the page, the form stops being fillable.`);
+  if (f.formFields) out.push(`${plural(f.formFields, 'form field')}: what they show stays on the page, the form stops being fillable.`);
+  const a = r.annotations;
+  if (a.redrawn) out.push(`${plural(a.redrawn, 'form field')} drawn from ${a.redrawn === 1 ? 'its value' : 'their values'}: the file did not say how ${a.redrawn === 1 ? 'it looks' : 'they look'}.`);
   // Form fields are told above; the rest of what was drawn in, here.
-  const drawn = Object.fromEntries(Object.entries(r.annotations.flattened).filter(([k]) => k !== 'Widget' || !f.formFields));
+  const drawn = Object.fromEntries(Object.entries(a.flattened).filter(([k]) => k !== 'Widget' || !f.formFields));
   if (sum(drawn)) out.push(`${kinds(drawn)}: drawn into the page, as ${sum(drawn) === 1 ? 'it' : 'they'} looked.`);
-  if (sum(r.annotations.dropped)) out.push(`${plural(sum(r.annotations.dropped), 'hidden annotation')}, removed.`);
+  if (sum(a.blank)) out.push(`${kinds(a.blank)} with nothing to draw (no appearance in the file), removed.`);
+  if (sum(a.dropped)) out.push(`${plural(sum(a.dropped), 'hidden annotation')}, removed.`);
   if (sum(r.annotations.removed)) out.push(`${plural(sum(r.annotations.removed), 'link or comment pop-up')}, removed.`);
   if (f.bookmarks) out.push('Bookmarks.');
   if (f.tags) out.push('Accessibility tags (structure tree).');
