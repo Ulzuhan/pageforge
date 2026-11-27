@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Encryption } from '@pdf-core/open';
 import { CoreError, inspect } from './core';
 import { openForPreview, renderThumbnail } from './pdf';
+import { TOO_LARGE } from './ui';
 
 export type PdfState =
   | { phase: 'empty' }
@@ -17,6 +18,7 @@ export function usePdf() {
   const turn = useRef(0);
   const open = useCallback(async (file: File, password?: string) => {
     const mine = ++turn.current;
+    if (file.size >= TOO_LARGE) { setState({ phase: 'failed', file, message: `${file.name} is too large to work on in a browser tab.` }); return; }
     setState({ phase: 'reading', file });
     try {
       const info = await inspect(file, password);

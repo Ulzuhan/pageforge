@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CoreError, Download, EncryptionNotice, FilePicker, PasswordPrompt, SizeNotice, inspect, plural, run, size } from '@shell';
+import { CoreError, Download, EncryptionNotice, FilePicker, PasswordPrompt, SizeNotice, TOO_LARGE, inspect, plural, run, size } from '@shell';
 import type { Encryption } from '@pdf-core/open';
 import { JobStatus, move, useJob, useReorder } from '../parts';
 
@@ -37,8 +37,8 @@ export function Merge() {
   const reorder = (from: number, to: number) => { reset(); setItems((list) => move(list, from, to)); };
   const { props, over } = useReorder(reorder);
 
-  const ready = items.length >= 2 && items.every((it) => it.state === 'ready');
   const total = items.reduce((a, it) => a + it.file.size, 0);
+  const ready = items.length >= 2 && items.every((it) => it.state === 'ready') && total < TOO_LARGE;
 
   async function merge() {
     await start('Merging', async () => {

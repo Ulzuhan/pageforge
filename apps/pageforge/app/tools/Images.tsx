@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, FilePicker, SizeNotice, plural, run, size } from '@shell';
+import { Download, FilePicker, SizeNotice, TOO_LARGE, plural, run, size } from '@shell';
 import type { Paper } from '@pdf-core/images';
 import { JobStatus, move, useJob, useReorder, where } from '../parts';
 
@@ -51,7 +51,8 @@ export function Images() {
             </select>
           </label>
           <div className="run">
-            <button type="button" className="primary" disabled={job.phase === 'working'} onClick={() => void make()} data-testid="run">
+            <button type="button" className="primary" disabled={job.phase === 'working' || items.reduce((a, it) => a + it.file.size, 0) >= TOO_LARGE}
+              onClick={() => void make()} data-testid="run">
               Make a PDF of {plural(items.length, 'image')}
             </button>
           </div>
