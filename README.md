@@ -113,6 +113,7 @@ off. With an OIDC provider, copy `.env.example`. Every variable exists as
 | `<TOOL>_SESSION_TTL_HOURS` | default 2 |
 | `<TOOL>_ACCOUNT_URL` | optional link to the account page |
 | `<TOOL>_INSECURE_COOKIES=1` | local http only |
+| `<TOOL>_INDEXABLE=1` | search engines may index the landing page. Unset (the default), `robots.txt` shuts everything and every response says `X-Robots-Tag: noindex` |
 | `HOSTNAME`, `PORT` | default `127.0.0.1`, 3468 (PageForge) / 3469 (InkBar) |
 
 ## Tests
@@ -143,18 +144,23 @@ It uses Keycloak-shaped paths, so the tools can only work by obeying discovery.
 UserInfo returns no groups; they travel in the access token, as with providers
 that add them through a claims hook.
 
-CI runs everything twice: against the binaries, and against the two images
-(read-only root filesystem, no capabilities, uid 10001).
+CI runs everything against the binaries, and the HTTP and browser suites again
+against the two images (read-only root filesystem, no capabilities, uid 10001),
+once on `linux/amd64` and once on `linux/arm64`, each on a runner of that
+architecture.
 
 ## Images
 
 - `ghcr.io/ulzuhan/pageforge` and `ghcr.io/ulzuhan/inkbar` are built from the
   same `Dockerfile` (`--build-arg TOOL=…`).
+- Every tag is a multi-arch index: `linux/amd64` and `linux/arm64`, each built
+  natively, without emulation.
 - A push to `main` publishes both as `:main`.
 - A tag `pageforge-vX.Y.Z` or `inkbar-vX.Y.Z` releases one tool.
-- Every image is signed with a build-provenance attestation (Sigstore, keyless).
-  The same workflow verifies it against this repository, workflow, commit and
-  ref, and then scans the image with Trivy.
+- Each architecture is scanned with Trivy before anything is tagged.
+- The index and each image are signed with a build-provenance attestation
+  (Sigstore, keyless). The same workflow verifies the three against this
+  repository, workflow, commit and ref.
 
 ```bash
 gh attestation verify oci://ghcr.io/ulzuhan/pageforge:main --repo Ulzuhan/pageforge

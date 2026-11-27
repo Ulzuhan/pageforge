@@ -44,6 +44,15 @@ for (const app of Object.values(apps)) {
     assert.match(res.headers.get('content-security-policy'), /require-trusted-types-for 'script'/);
   });
 
+  await check('search engines stay out until it is announced', async () => {
+    const robots = await get(`${app.origin}/robots.txt`);
+    assert.equal(robots.status, 200);
+    assert.equal(await robots.text(), 'User-agent: *\nDisallow: /\n');
+    for (const path of ['/', '/robots.txt', '/healthz']) {
+      assert.equal((await get(`${app.origin}${path}`)).headers.get('x-robots-tag'), 'noindex, nofollow', path);
+    }
+  });
+
   await check('the tool is behind sign-in', async () => {
     const res = await get(`${app.origin}/app/`);
     assert.equal(res.status, 302);

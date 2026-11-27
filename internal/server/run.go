@@ -78,6 +78,15 @@ func OptionsFromEnv(name, prefix string, getenv func(string) string) (Options, [
 	if h, err := strconv.Atoi(strings.TrimSpace(getenv(prefix + "_SESSION_TTL_HOURS"))); err == nil && h > 0 && h <= 24 {
 		opt.SessionTTL = time.Duration(h) * time.Hour
 	}
+	// Out of search engines unless told otherwise, and told only by "1": a tool
+	// that is deployed but not announced must not turn up in results by accident.
+	switch v := strings.TrimSpace(getenv(prefix + "_INDEXABLE")); v {
+	case "1":
+		opt.Indexable = true
+	case "":
+	default:
+		warnings = append(warnings, prefix+"_INDEXABLE is not 1; search engines stay out")
+	}
 	if raw := getenv(prefix + "_ACCOUNT_URL"); raw != "" {
 		if opt.AccountURL = auth.ValidURL(raw, true); opt.AccountURL == "" {
 			warnings = append(warnings, prefix+"_ACCOUNT_URL is not a valid https URL; the account link is hidden")
