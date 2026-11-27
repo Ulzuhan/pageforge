@@ -6,7 +6,10 @@ name: Publish container images
 #   tag pageforge-vX.Y.Z PageForge only: :X.Y.Z, :X.Y, :X, :latest
 #   tag inkbar-vX.Y.Z    InkBar only, same ladder
 #
-# Only the release build mints :latest, and it is the same build that mints the
+# Every tag names one multi-arch index: linux/amd64 and linux/arm64, each built
+# natively on its own runner (no emulation). The architectures are pushed by
+# digest only, untagged, and scanned; the tags go on the index only once both
+# are clean. Only the release build mints :latest, in the same step as the
 # version ladder, so they are the same digest by construction (the lesson from
 # the house services, where two runs raced and left :latest on another digest).
 on:
@@ -20,7 +23,7 @@ env:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       tools: ${{ steps.which.outputs.tools }}
     steps:
@@ -32,9 +35,95 @@ jobs:
             *)                      echo 'tools=["pageforge","inkbar"]' >> "$GITHUB_OUTPUT" ;;
           esac
 
+  # One architecture of one tool, on a runner of that architecture.
   build:
+    name: Build ${{ matrix.tool }} (linux/${{ matrix.arch }})
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: ${{ fromJSON(needs.plan.outputs.tools) }}
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: image
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.tool }}" >> "$GITHUB_OUTPUT"
+
+      # Labels only: the tags belong to the index, in the publish job.
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.tool }}
+
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          build-args: TOOL=${{ matrix.tool }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
+          # BuildKit's provenance and SBOM are unsigned in-toto statements: they
+          # cover integrity, not origin. The signature is the attestation of the
+          # publish job.
+          provenance: mode=max
+          sbom: true
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.tool }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.tool }}-${{ matrix.arch }}
+
+      # The CVE gate, per architecture and before any tag: highs and criticals
+      # with a fix available stop the release here.
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+          TRIVY_TIMEOUT: 20m
+
+      - name: Hand the digest to the publish job
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ matrix.tool }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Both architectures of one tool become one index, and only then get tags.
+  publish:
+    name: Publish ${{ matrix.tool }} (multi-arch index)
+    needs: [plan, build]
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +135,11 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-${{ matrix.tool }}-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
@@ -63,8 +156,6 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
-          labels: |
-            org.opencontainers.image.title=${{ matrix.tool }}
           tags: |
             type=match,pattern=${{ matrix.tool }}-v(\d+\.\d+\.\d+),group=1
             type=match,pattern=${{ matrix.tool }}-v(\d+\.\d+)\.\d+,group=1
@@ -73,49 +164,68 @@ jobs:
             type=ref,event=branch
             type=sha,format=short,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
 
-      - id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: .
-          build-args: TOOL=${{ matrix.tool }}
-          platforms: linux/amd64
-          push: true
-          # BuildKit's provenance and SBOM are unsigned in-toto statements: they
-          # cover integrity, not origin. The signature is the attestation below.
-          provenance: mode=max
-          sbom: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.tool }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.tool }}
+      # One index, every tag at once. Then read back what the registry holds:
+      # exactly one linux/amd64 and one linux/arm64 image, and the digests of
+      # the index and of each image for the signatures below.
+      - id: index
+        name: Create the multi-arch index and tag it
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          REPO: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+        run: |
+          test "$(ls | wc -l)" -eq 2
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          # shellcheck disable=SC2046,SC2086
+          docker buildx imagetools create $tags $(printf "${REPO}@sha256:%s " *)
+          first=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          index=$(docker buildx imagetools inspect "$first" --format '{{json .Manifest}}' | jq -r .digest)
+          raw=$(docker buildx imagetools inspect --raw "$first")
+          one() {
+            jq -r --arg a "$1" '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest]
+              | if length == 1 then .[0] else error("expected one linux/" + $a + " image") end' <<< "$raw"
+          }
+          amd64=$(one amd64)
+          arm64=$(one arm64)
+          for d in "$index" "$amd64" "$arm64"; do
+            [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "not a digest: '$d'"; exit 1; }
+          done
+          printf 'index=%s\namd64=%s\narm64=%s\n' "$index" "$amd64" "$arm64" >> "$GITHUB_OUTPUT"
+          printf '%s: index `%s` (linux/amd64 `%s`, linux/arm64 `%s`)\n' "$first" "$index" "$amd64" "$arm64" >> "$GITHUB_STEP_SUMMARY"
 
-      # THE SIGNATURE: keyless, with this run's OIDC identity against Sigstore.
+      # THE SIGNATURES: keyless, with this run's OIDC identity against Sigstore.
+      # The index is what gets deployed by digest; each image is signed too, so
+      # a runtime that resolves the index to its own architecture can verify
+      # exactly what it pulled.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.index.outputs.index }}
+          push-to-registry: true
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.index.outputs.amd64 }}
+          push-to-registry: true
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.index.outputs.arm64 }}
           push-to-registry: true
 
       # The gate: what was just signed is verified here, bound to this repository,
       # this workflow file, this commit and this ref. A red release is not deployed.
-      - name: Verify the signature of what was just published
+      - name: Verify the signatures of what was just published
         run: |
-          gh attestation verify "oci://${REGISTRY}/${IMAGE}@${DIGEST}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/docker.yml" \
-            --source-digest "${GITHUB_SHA}" \
-            --source-ref "${GITHUB_REF}"
+          for digest in "$INDEX" "$AMD64" "$ARM64"; do
+            gh attestation verify "oci://${REGISTRY}/${IMAGE}@${digest}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/docker.yml" \
+              --source-digest "${GITHUB_SHA}" \
+              --source-ref "${GITHUB_REF}"
+          done
         env:
           GH_TOKEN: ${{ github.token }}
           IMAGE: ${{ steps.image.outputs.name }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-
-      # And the CVE gate: highs and criticals with a fix available turn the run red.
-      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: 1
-        env:
-          TRIVY_TIMEOUT: 20m
+          INDEX: ${{ steps.index.outputs.index }}
+          AMD64: ${{ steps.index.outputs.amd64 }}
+          ARM64: ${{ steps.index.outputs.arm64 }}

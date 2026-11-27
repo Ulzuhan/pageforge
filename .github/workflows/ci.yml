@@ -40,11 +40,40 @@ jobs:
         run: npm run test:browser
       - name: Lighthouse on both landing pages
         run: npm run test:lighthouse
+
+  # The same suites against the images, on each architecture they are published
+  # for, each built natively on a runner of that architecture (no emulation).
+  # arm64 is what production runs.
+  images:
+    name: Images (linux/${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      CI: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - name: Build both images
         run: |
           docker build --build-arg TOOL=pageforge -t pageforge-ci-pageforge .
           docker build --build-arg TOOL=inkbar -t pageforge-ci-inkbar .
-      - name: The same suites against the images (read-only, no capabilities, uid 10001)
+          for tool in pageforge inkbar; do
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "pageforge-ci-$tool")" = "linux/${{ matrix.arch }}"
+          done
+      - run: npx playwright install --with-deps chromium
+      - name: The suites against the images (read-only, no capabilities, uid 10001)
         env:
           TEST_LAUNCH: "1"
           TEST_IMAGE_PREFIX: pageforge-ci
