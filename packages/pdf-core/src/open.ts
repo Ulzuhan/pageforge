@@ -6,7 +6,8 @@
 //    password. The tools say so: the author asked for the file not to be
 //    changed, and the copy comes out without encryption.
 //  - user password: asked for; without it, the file cannot be opened.
-import { PDFDocument } from '@cantoo/pdf-lib';
+import { PDFDict, PDFDocument, type PDFObject } from '@cantoo/pdf-lib';
+import { get, look, text } from './objects';
 
 export type Encryption = 'none' | 'owner-password-only' | 'user-password';
 
@@ -26,10 +27,13 @@ export class PasswordRequired extends Error {
 const encrypted = (e: unknown) => /encrypt|password/i.test(String((e as Error)?.message ?? e));
 
 export async function openPdf(bytes: Uint8Array, password?: string): Promise<Opened> {
-  const done = (doc: PDFDocument, encryption: Encryption): Opened => ({
-    doc, encryption, pages: doc.getPageCount(),
-    producer: [doc.getProducer(), doc.getCreator()].filter(Boolean).join(' · '),
-  });
+  const done = (doc: PDFDocument, encryption: Encryption): Opened => {
+    // Not doc.getProducer(): it creates an empty /Info when there is none, and
+    // that would end up in a compressed file that had none.
+    const info = look(doc.context, doc.context.trailerInfo.Info as PDFObject | undefined);
+    const field = (k: string) => (info instanceof PDFDict ? text(get(doc.context, info, k)) : undefined);
+    return { doc, encryption, pages: doc.getPageCount(), producer: [field('Producer'), field('Creator')].filter(Boolean).join(' · ') };
+  };
   try {
     return done(await PDFDocument.load(bytes, { updateMetadata: false }), 'none');
   } catch (e) {

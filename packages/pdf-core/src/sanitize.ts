@@ -14,7 +14,7 @@
 //     /Metadata (XMP) and what pdfTeX leaves when it includes a figure
 //     (PTEX.InfoDict with the figure's Info, PTEX.FileName with its path).
 import { PDFDict, PDFDocument, PDFName, PDFStream, type PDFContext, type PDFObject } from '@cantoo/pdf-lib';
-import { get, look, name, num, pageContent, pageResources, streamBytes, N } from './objects';
+import { get, look, name, num, pageContent, pageResources, streamBytes, walk, N } from './objects';
 import { tokenize } from './tokenize';
 
 export const PAGE_KEYS = ['Annots', 'AA', 'Metadata', 'PieceInfo', 'StructParents', 'Thumb', 'B', 'Tabs'];
@@ -118,16 +118,19 @@ export function residue(doc: PDFDocument): string[] {
   for (const k of ['Metadata', 'StructTreeRoot', 'Outlines', 'AcroForm', 'OpenAction', 'AA', 'Names']) {
     if (doc.catalog.has(N(k))) found.push(`catalog /${k}`);
   }
+  const info = look(ctx, ctx.trailerInfo.Info as PDFObject | undefined);
+  if (info instanceof PDFDict && info.entries().length) found.push('trailer /Info');
   doc.getPages().forEach((p, i) => {
     for (const k of PAGE_KEYS) if (p.node.has(N(k))) found.push(`page ${i} /${k}`);
   });
-  for (const [, obj] of ctx.enumerateIndirectObjects()) {
+  walk(ctx, (obj) => {
     const d = obj instanceof PDFStream ? obj.dict : obj instanceof PDFDict ? obj : undefined;
-    if (!d) continue;
+    if (!d) return;
     for (const k of XOBJECT_KEYS) if (d.has(N(k))) found.push(`object /${k}`);
     if (d.has(N('JS')) || d.has(N('JavaScript'))) found.push('object /JS');
-    if (d.has(N('EmbeddedFile')) || name(get(ctx, d, 'Type')) === 'EmbeddedFile') found.push('embedded file');
-  }
+    if (name(get(ctx, d, 'S')) === 'JavaScript' || name(get(ctx, d, 'S')) === 'Launch') found.push('action that runs code');
+    if (d.has(N('EmbeddedFile')) || name(get(ctx, d, 'Type')) === 'EmbeddedFile' || d.has(N('EF'))) found.push('embedded file');
+  });
   return found;
 }
 

@@ -1,20 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CoreResponse } from '@pdf-core/worker';
-import { inspect, openForPreview, renderThumbnail } from './pdf';
+import { inspect, CoreError, type Inspection } from './core';
+import { openForPreview, renderThumbnail } from './pdf';
+import { FilePicker, PasswordPrompt } from './ui';
 
 type State =
   | { phase: 'idle' }
   | { phase: 'working'; name: string }
   | { phase: 'password'; name: string; wrong: boolean }
-  | { phase: 'done'; name: string; size: number; info: Extract<CoreResponse, { ok: true }>; thumbs: string[] }
+  | { phase: 'done'; name: string; size: number; info: Inspection; thumbs: string[] }
   | { phase: 'failed'; name: string; message: string };
 
 const THUMBS = 6;
 
 /**
- * F2's empty editor: open a PDF and see what the tools see — pages, encryption,
- * producer, and every glyph read by pdf-core — with pdf.js thumbnails. Nothing
- * is changed or saved yet; the tools themselves arrive in F3 and F4.
+ * InkBar's editor until F4: open a PDF and see what the tool sees — pages,
+ * encryption, producer, and every glyph read by pdf-core — with pdf.js
+ * thumbnails. Nothing is changed or saved.
  */
 export function Inspector({ intro }: { intro: string }) {
   const [state, setState] = useState<State>({ phase: 'idle' });
@@ -27,15 +28,17 @@ export function Inspector({ intro }: { intro: string }) {
     thumbs.current.forEach((u) => URL.revokeObjectURL(u));
     thumbs.current = [];
     setState({ phase: 'working', name: f.name });
-    const bytes = await f.arrayBuffer();
-    const info = await inspect(bytes, password);
-    if (!info.ok) {
-      if (info.error === 'password' || info.error === 'wrong-password') setState({ phase: 'password', name: f.name, wrong: info.error === 'wrong-password' });
+    let info: Inspection;
+    try {
+      info = await inspect(f, password, true);
+    } catch (e) {
+      const code = e instanceof CoreError ? e.code : 'failed';
+      if (code === 'password' || code === 'wrong-password') setState({ phase: 'password', name: f.name, wrong: code === 'wrong-password' });
       else setState({ phase: 'failed', name: f.name, message: 'This file could not be read as a PDF.' });
       return;
     }
     try {
-      const { doc, close } = await openForPreview(bytes, password);
+      const { doc, close } = await openForPreview(await f.arrayBuffer(), password);
       for (let i = 1; i <= Math.min(THUMBS, doc.numPages); i++) thumbs.current.push(await renderThumbnail(doc, i));
       await close();
     } catch {
@@ -45,32 +48,18 @@ export function Inspector({ intro }: { intro: string }) {
   }
 
   return (
-    <section className="inspector">
+    <section className="tool">
       <p className="intro">{intro}</p>
-      <label className="drop">
-        <input type="file" accept="application/pdf,.pdf" data-testid="file"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) { file.current = f; void run(f); } }} />
-        <span>Choose a PDF</span>
-      </label>
+      <FilePicker accept="application/pdf,.pdf" label="Choose a PDF" onFiles={([f]) => { file.current = f; void run(f); }} />
 
       {state.phase === 'working' && <p className="status" data-testid="status">Reading {state.name}…</p>}
-
       {state.phase === 'password' && (
-        <form className="password" onSubmit={(e) => {
-          e.preventDefault();
-          const pw = new FormData(e.currentTarget).get('password');
-          if (file.current && typeof pw === 'string') void run(file.current, pw);
-        }}>
-          <p>{state.wrong ? 'That password did not open it. Try again:' : `${state.name} needs a password to open.`}</p>
-          <input name="password" type="password" autoComplete="off" data-testid="password" />
-          <button type="submit">Open</button>
-        </form>
+        <PasswordPrompt name={state.name} wrong={state.wrong} onSubmit={(pw) => { if (file.current) void run(file.current, pw); }} />
       )}
-
       {state.phase === 'failed' && <p className="status error" data-testid="status">{state.message}</p>}
 
       {state.phase === 'done' && (
-        <div className="result" data-testid="result">
+        <div className="report" data-testid="result">
           <dl>
             <dt>File</dt><dd>{state.name} · {(state.size / 1024).toFixed(0)} kB</dd>
             <dt>Pages</dt><dd data-testid="pages">{state.info.pages}</dd>
