@@ -61,9 +61,15 @@ export async function splitFile(source: Source, mode: SplitMode, ranges: string,
   const groups = mode === 'every' ? o.doc.getPageIndices().map((p) => [p]) : parseRanges(ranges, o.pages);
   const parts = mode === 'extract' ? [groups.flat()] : groups;
   const files: { name: string; bytes: Uint8Array; pages: number }[] = [];
+  const names = new Set<string>();
   for (const g of parts) {
     const { bytes, report } = await finish(await assemble([o.doc], g.map((page) => ({ source: 0, page }))), []);
-    files.push({ name: `${base}-${groupLabel(g)}.pdf`, bytes, pages: report.pages });
+    // The same range twice is two files: a zip keeps one per name.
+    const stem = `${base}-${groupLabel(g)}`;
+    let name = `${stem}.pdf`;
+    for (let k = 2; names.has(name); k++) name = `${stem} (${k}).pdf`;
+    names.add(name);
+    files.push({ name, bytes, pages: report.pages });
   }
   const report: SplitReport = { files: files.map(({ name, pages }) => ({ name, pages })), encryption: [o.encryption], zipped: files.length > 1 };
   if (files.length === 1) return { bytes: files[0].bytes, name: files[0].name, report };

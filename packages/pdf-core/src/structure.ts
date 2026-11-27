@@ -17,7 +17,7 @@
 //    when they are chained after a harmless one (/Next);
 //  - form widgets let go of the field tree (/Parent), which would otherwise
 //    bring along the fields, values and scripts of every page.
-import { PDFArray, PDFDict, PDFDocument, PDFObjectCopier, PDFPage, PDFPageLeaf, PDFRef, degrees, type PDFObject } from '@cantoo/pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFObjectCopier, PDFPage, PDFPageLeaf, PDFRef, degrees, type PDFContext, type PDFObject } from '@cantoo/pdf-lib';
 import { N, get, look, name } from './objects';
 
 export interface PagePick {
@@ -56,15 +56,42 @@ export async function assemble(sources: PDFDocument[], picks: PagePick[]): Promi
       node = copied;
       used.add(key);
     } else {
-      // Again: a new page object that shares the copied resources.
+      // Again: a new page object that shares the copied resources, with
+      // annotations of its own (an annotation belongs to one page).
       node = copiers[p.source].copy(src.node);
       ref = out.context.register(node);
+      ownAnnotations(out.context, node);
     }
     const page = out.addPage(PDFPage.of(node, ref, out));
     const turn = ((p.rotate ?? 0) % 360 + 360) % 360;
     if (turn) page.setRotation(degrees((page.getRotation().angle + turn) % 360));
   }
   return { doc: out, tidy: tidy(out) };
+}
+
+/** Copies of a page's annotations for that page alone; pop-ups and replies point at the copies. */
+function ownAnnotations(ctx: PDFContext, node: PDFPageLeaf) {
+  const annots = look(ctx, node.get(N('Annots')));
+  if (!(annots instanceof PDFArray)) return;
+  const fresh = new Map<string, PDFRef>();
+  const copies: PDFDict[] = [];
+  const list: PDFRef[] = [];
+  for (const r of annots.asArray()) {
+    const a = look(ctx, r);
+    if (!(a instanceof PDFDict)) continue;
+    const c = a.clone(ctx);
+    const nr = ctx.register(c);
+    if (r instanceof PDFRef) fresh.set(String(r), nr);
+    copies.push(c);
+    list.push(nr);
+  }
+  for (const c of copies) {
+    for (const k of ['Popup', 'Parent', 'IRT']) {
+      const v = c.get(N(k));
+      if (v instanceof PDFRef && fresh.has(String(v))) c.set(N(k), fresh.get(String(v))!);
+    }
+  }
+  node.set(N('Annots'), ctx.obj(list));
 }
 
 function tidy(doc: PDFDocument): TidyReport {

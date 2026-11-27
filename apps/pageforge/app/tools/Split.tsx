@@ -45,7 +45,8 @@ function Options({ ready }: { ready: Extract<PdfState, { phase: 'ready' }> }) {
   }
 
   const summary = check.groups
-    ? mode === 'extract' ? `${plural(check.groups.flat().length, 'page')} into one PDF.` : `${plural(check.groups.length, 'PDF')}, in a zip.`
+    ? mode === 'extract' ? `${plural(check.groups.flat().length, 'page')} into one PDF.`
+      : check.groups.length === 1 ? 'One range: one PDF, without a zip.' : `${plural(check.groups.length, 'PDF')}, in a zip.`
     : mode === 'every' ? `${plural(ready.pages, 'PDF')}, in a zip.` : '';
 
   return (

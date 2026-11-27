@@ -19,7 +19,14 @@ const chrome = await chromeLauncher.launch({
 let failures = 0;
 try {
   for (const app of Object.values(apps)) {
-    const { lhr } = await lighthouse(`${app.origin}/`, { port: chrome.port, logLevel: 'error', onlyCategories: Object.keys(MIN) });
+    // A score of null is a measurement that failed (in CI, the first page of a
+    // cold browser sometimes reports NO_FCP), not a bad score: measure again.
+    let lhr;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      ({ lhr } = await lighthouse(`${app.origin}/`, { port: chrome.port, logLevel: 'error', onlyCategories: Object.keys(MIN) }));
+      if (Object.keys(MIN).every((k) => lhr.categories[k].score !== null)) break;
+      console.log(`     ${app.name}: no measurement (${lhr.runtimeError?.code ?? 'no score'}), attempt ${attempt} of 3`);
+    }
     const scores = Object.fromEntries(Object.keys(MIN).map((k) => [k, lhr.categories[k].score]));
     const low = Object.entries(MIN).filter(([k, min]) => (scores[k] ?? 0) < min);
     console.log(`${low.length ? 'FAIL' : 'ok  '} ${app.name}  ${Object.entries(scores).map(([k, v]) => `${k} ${Math.round(v * 100)}`).join(' · ')}`);

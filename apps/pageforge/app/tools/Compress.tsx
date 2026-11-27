@@ -63,8 +63,12 @@ function Levels({ ready }: { ready: Extract<PdfState, { phase: 'ready' }> }) {
       </div>
       <JobStatus job={job} />
       {out && r && (r.unchanged || gain < 0.05) && (
-        <Notice>This PDF is already about as compressed as we can make it {level === 'lossless' ? 'without losing quality' : 'at this level'}
-          {r.unchanged ? ', so here it is as it was' : ''}.{level !== 'strong' && ' A stronger level may still help.'}</Notice>
+        <Notice>
+          {r.unchanged
+            ? 'Compressing would not make this PDF smaller'
+            : 'This PDF was already about as compressed as we can make it'} {level === 'lossless' ? 'without losing quality' : 'at this level'}
+          {r.unchanged ? ', so there is nothing new to download: keep the one you have' : ''}.{level !== 'strong' && ' A stronger level may still help.'}
+        </Notice>
       )}
       {out && r && !r.unchanged && (
         <Download bytes={out.bytes} name={`${baseName(ready.file.name)}-compressed.pdf`} mime={out.mime}>

@@ -66,6 +66,20 @@ describe('organize', () => {
     expect((await load(again.bytes)).getPages().map((p) => p.getRotation().angle)).toEqual([90, 270]);
   });
 
+  it('gives a page used twice annotations of its own, and both copies keep their links', async () => {
+    const r = await organizeFile({ bytes: await labelledPdf(['P1', 'P2'], { link: true }) }, [{ page: 0, rotate: 0 }, { page: 0, rotate: 0 }, { page: 1, rotate: 0 }]);
+    const doc = await load(r.bytes);
+    const refs = (i: number) => (doc.getPage(i).node.lookup(PDFName.of('Annots')) as PDFArray).asArray().map(String);
+    expect(refs(0)).toHaveLength(2);
+    expect(refs(1)).toHaveLength(2);
+    expect(refs(0).filter((x) => refs(1).includes(x))).toEqual([]);
+    for (const i of [0, 1]) {
+      const dests = (doc.getPage(i).node.lookup(PDFName.of('Annots')) as PDFArray).asArray()
+        .map((a) => (doc.context.lookup(a) as PDFDict).lookup(PDFName.of('Dest'))).filter(Boolean) as PDFArray[];
+      expect(dests.map((d) => String(d.get(0)))).toEqual([String(doc.getPage(2).ref)]);
+    }
+  });
+
   it('keeps a link between pages that came along, drops one whose page did not, and removes code', async () => {
     const src = await labelledPdf(['P1', 'P2'], { link: true, risky: true });
     const both = await organizeFile({ bytes: src }, [{ page: 1, rotate: 0 }, { page: 0, rotate: 0 }]);
@@ -138,6 +152,12 @@ describe('split', () => {
     expect(Object.keys(files)).toEqual(['doc-pages-1-2.pdf', 'doc-page-4.pdf']);
     expect(await widths(files['doc-pages-1-2.pdf'])).toEqual([500, 501]);
     expect(await widths(files['doc-page-4.pdf'])).toEqual([503]);
+  });
+
+  it('names the same range twice as two files', async () => {
+    const r = await splitFile({ bytes: await labelledPdf(['P1', 'P2', 'P3']) }, 'ranges', '1-2, 3, 1-2', base);
+    expect(r.report.files.map((f) => f.name)).toEqual(['doc-pages-1-2.pdf', 'doc-page-3.pdf', 'doc-pages-1-2 (2).pdf']);
+    expect(Object.keys(unzipSync(r.bytes))).toEqual(r.report.files.map((f) => f.name));
   });
 
   it('makes one file per page', async () => {
