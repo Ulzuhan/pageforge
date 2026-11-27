@@ -221,7 +221,44 @@ func TestOptionsFromEnv(t *testing.T) {
 		"INKBAR_OIDC_CLIENT_ID": "c", "INKBAR_OIDC_CLIENT_SECRET": "s", "INKBAR_OIDC_REDIRECT_URI": "https://ink.example.com/auth/callback",
 		"INKBAR_ACCOUNT_URL": "http://account.example.com"}
 	opt, warn := OptionsFromEnv("inkbar", "INKBAR", func(k string) string { return env[k] })
-	if opt.OIDC != nil || opt.AccountURL != "" || len(warn) != 2 || !opt.SecureCookies {
+	if opt.OIDC != nil || opt.AccountURL != "" || len(warn) != 2 || !opt.SecureCookies || opt.Indexable {
 		t.Errorf("a short secret switches sign-in off, an http account URL is hidden: %+v %v", opt, warn)
+	}
+	for v, want := range map[string]bool{"1": true, " 1 ": true, "true": false, "yes": false, "0": false} {
+		opt, warn := OptionsFromEnv("pageforge", "PAGEFORGE", func(k string) string {
+			if k == "PAGEFORGE_INDEXABLE" {
+				return v
+			}
+			return ""
+		})
+		warned := false
+		for _, w := range warn {
+			warned = warned || strings.Contains(w, "PAGEFORGE_INDEXABLE")
+		}
+		if opt.Indexable != want || warned == want {
+			t.Errorf("PAGEFORGE_INDEXABLE=%q: indexable %v, warned %v", v, opt.Indexable, warned)
+		}
+	}
+}
+
+func TestSearchEnginesStayOutUntilAnnounced(t *testing.T) {
+	_, h := newTestServer(t, nil)
+	for _, p := range []string{"/", "/app/", "/healthz", "/nope", "/robots.txt", "/assets/app-abc12.js"} {
+		if got := do(h, "GET", p).Header().Get("X-Robots-Tag"); got != "noindex, nofollow" {
+			t.Errorf("%s: X-Robots-Tag %q, want noindex", p, got)
+		}
+	}
+	rec := do(h, "GET", "/robots.txt")
+	if rec.Code != http.StatusOK || rec.Body.String() != "User-agent: *\nDisallow: /\n" {
+		t.Errorf("robots.txt before the announcement: %d %q", rec.Code, rec.Body.String())
+	}
+
+	h = New(Tool{Name: "pageforge", Title: "PageForge", Dist: testDist()}, Options{Indexable: true}).Handler()
+	if got := do(h, "GET", "/").Header().Get("X-Robots-Tag"); got != "" {
+		t.Errorf("once announced the landing page is indexable, got X-Robots-Tag %q", got)
+	}
+	body := do(h, "GET", "/robots.txt").Body.String()
+	if strings.Contains(body, "Disallow: /\n") || !strings.Contains(body, "Disallow: /app/") || !strings.Contains(body, "Disallow: /auth/") {
+		t.Errorf("once announced, robots.txt opens the landing page only: %q", body)
 	}
 }

@@ -43,7 +43,11 @@ type Options struct {
 	SessionTTL    time.Duration
 	AccountURL    string // link to the account app; empty hides the button
 	SecureCookies bool
-	Log           *slog.Logger
+	// Indexable lets search engines index the landing page. Until the tool is
+	// announced it is false: robots.txt shuts everything and every response
+	// carries X-Robots-Tag: noindex.
+	Indexable bool
+	Log       *slog.Logger
 }
 
 type Server struct {
@@ -114,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 	})
+	mux.HandleFunc("GET /robots.txt", s.robots)
 	mux.HandleFunc("GET /auth/login", s.login)
 	mux.HandleFunc("GET /auth/callback", s.callback)
 	mux.HandleFunc("POST /auth/logout", s.logout)
@@ -140,6 +145,9 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
 		h.Set("Strict-Transport-Security", "max-age=31536000")
+		if !s.opt.Indexable {
+			h.Set("X-Robots-Tag", "noindex, nofollow")
+		}
 
 		logout := r.Method == http.MethodPost && r.URL.Path == "/auth/logout"
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && !logout {
@@ -163,6 +171,18 @@ func (s *Server) refuse(w http.ResponseWriter, r *http.Request, why string) {
 	s.opt.Log.Info("refused", "tool", s.tool.Name, "why", why, "method", r.Method, "path", r.URL.Path)
 	w.Header().Set("Cache-Control", "no-store")
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+// robots keeps search engines out until the tool is announced. Once it is,
+// only the public landing page is theirs; the tool and sign-in stay out.
+func (s *Server) robots(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if !s.opt.Indexable {
+		_, _ = w.Write([]byte("User-agent: *\nDisallow: /\n"))
+		return
+	}
+	_, _ = w.Write([]byte("User-agent: *\nDisallow: /app/\nDisallow: /auth/\nDisallow: /api/\n"))
 }
 
 // static serves the public build: the landing page and its assets. Nothing in

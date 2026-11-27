@@ -113,6 +113,7 @@ off. With an OIDC provider, copy `.env.example`. Every variable exists as
 | `<TOOL>_SESSION_TTL_HOURS` | default 2 |
 | `<TOOL>_ACCOUNT_URL` | optional link to the account page |
 | `<TOOL>_INSECURE_COOKIES=1` | local http only |
+| `<TOOL>_INDEXABLE=1` | search engines may index the landing page. Unset (the default), `robots.txt` shuts everything and every response says `X-Robots-Tag: noindex` |
 | `HOSTNAME`, `PORT` | default `127.0.0.1`, 3468 (PageForge) / 3469 (InkBar) |
 
 ## Tests

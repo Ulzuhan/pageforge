@@ -11,6 +11,10 @@ import { startAll } from './harness.mjs';
 
 const MIN = { performance: 0.9, accessibility: 1, 'best-practices': 1, seo: 1 };
 
+// Measured as the pages will be once announced. Until then they say noindex,
+// and an SEO score of a page that asks search engines to skip it means nothing.
+process.env.PAGEFORGE_INDEXABLE = '1';
+process.env.INKBAR_INDEXABLE = '1';
 const { apps, stop } = await startAll();
 const chrome = await chromeLauncher.launch({
   chromePath: process.env.CI ? chromium.executablePath() : undefined,
