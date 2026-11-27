@@ -36,8 +36,10 @@ jobs:
       - name: Gate and «nowhere to upload», against the binaries
         run: npm run test:http
       - run: npx playwright install --with-deps chromium
-      - name: CSP, Trusted Types, network and gate, in a browser, against the binaries
+      - name: CSP, Trusted Types, network, gate and PageForge's six tools, in a browser, against the binaries
         run: npm run test:browser
+      - name: Lighthouse on both landing pages
+        run: npm run test:lighthouse
       - name: Build both images
         run: |
           docker build --build-arg TOOL=pageforge -t pageforge-ci-pageforge .

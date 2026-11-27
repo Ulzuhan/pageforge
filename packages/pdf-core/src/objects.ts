@@ -1,7 +1,7 @@
 // Small helpers over @cantoo/pdf-lib's object model: resolve references, read
 // numbers and names, decode streams, and find a page's content and resources.
 import {
-  PDFArray, PDFDict, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFStream, decodePDFRawStream,
+  PDFArray, PDFDict, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream,
   type PDFContext, type PDFObject,
 } from '@cantoo/pdf-lib';
 
@@ -89,4 +89,28 @@ export function bboxOf(pts: Point[]): Box {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
   return [x0, y0, x1, y1];
+}
+
+/**
+ * Visits every object reachable from the trailer once, nested direct objects
+ * included (an /OpenAction written inline is not an indirect object).
+ */
+export function walk(ctx: PDFContext, visit: (o: PDFObject) => void) {
+  const seen = new Set<PDFObject>();
+  const go = (o: PDFObject | undefined) => {
+    if (!o || seen.has(o)) return;
+    seen.add(o);
+    if (o instanceof PDFRef) { go(ctx.lookup(o)); return; }
+    visit(o);
+    if (o instanceof PDFDict) for (const [, v] of o.entries()) go(v);
+    else if (o instanceof PDFArray) for (const v of o.asArray()) go(v);
+    else if (o instanceof PDFStream) for (const [, v] of o.dict.entries()) go(v); // the stream stands for its dictionary
+  };
+  const t = ctx.trailerInfo;
+  for (const o of [t.Root, t.Info]) go(o as PDFObject | undefined);
+}
+
+/** Text of a string object, or undefined. Reading /Producer this way does not create an /Info. */
+export function text(o: PDFObject | undefined): string | undefined {
+  return o instanceof PDFString || o instanceof PDFHexString ? o.decodeText() : undefined;
 }
